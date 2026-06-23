@@ -1,6 +1,5 @@
 import "dotenv/config";
 
-// console.log(process.env.DATABASE_URL);
 import express from "express";
 import jwt from "jsonwebtoken";
 import { JWT_SECRET } from "@repo/backend-common/config";
@@ -16,16 +15,14 @@ import bcrypt from "bcrypt";
 const app = express();
 
 app.use(express.json());
-app.listen(8000);
+
 app.get("/", (req, res) => {
   res.send("Hello");
 });
 
 app.post("/signup", async (req, res) => {
-  console.log(JSON.stringify(req.body));
   const { data, success } = CreateUserSchema.safeParse(req.body);
 
-  console.log(success);
   if (!success) {
     return res.json({
       message: "Incorrect inputs",
@@ -61,9 +58,6 @@ app.post("/signup", async (req, res) => {
 
 app.post("/signin", async (req, res) => {
   const { data, success } = SigninSchema.safeParse(req.body);
-
-  console.log(JSON.stringify(req.body));
-  console.log(success);
 
   if (!success) {
     return res.json({
@@ -118,6 +112,7 @@ app.post("/room", authMiddleware, async (req, res) => {
 
     res.json({
       roomId: createdRoom.id,
+      slug: createdRoom.slug,
     });
   } catch (error) {
     return res.status(411).json({
@@ -125,3 +120,34 @@ app.post("/room", authMiddleware, async (req, res) => {
     });
   }
 });
+
+app.get("/chats/:roomId", async (req, res) => {
+  const roomId = Number(req.params.roomId);
+  const messages = await prisma.chat.findMany({
+    where: {
+      roomId: roomId,
+    },
+    orderBy: {
+      id: "desc",
+    },
+    take: 50,
+  });
+
+  res.status(200).json({
+    messages,
+  });
+});
+
+app.get("/room/:slug", async (req, res) => {
+  const slug = req.params.slug;
+  const room = await prisma.room.findFirst({
+    where: {
+      slug: slug,
+    },
+  });
+
+  res.json({
+    room,
+  });
+});
+app.listen(8000);
