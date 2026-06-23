@@ -1,12 +1,94 @@
-import { WebSocketServer } from "ws";
+import WebSocket, { WebSocketServer } from "ws";
+import jwt from "jsonwebtoken";
+import { JWT_SECRET } from "@repo/backend-common/config";
+import { prisma } from "@repo/db";
 
 const wss = new WebSocketServer({ port: 8080 });
 
-wss.on("connection", (ws) => {
-  ws.on("error", console.error);
+interface User {
+  ws: WebSocket;
+  rooms: string[];
+  userId: string;
+}
 
-  ws.on("message", (data) => {
-    console.log("recieved: ", data);
-    ws.send("pong");
+const users: User[] = [];
+
+function checkUser(token: string): string | null {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    if (typeof decoded == "string") {
+      return null;
+    }
+
+    if (!decoded || !decoded.userId) {
+      return null;
+    }
+
+    return decoded.userId;
+  } catch (error) {
+    return null;
+  }
+}
+
+wss.on("connection", function connnection(ws, request) {
+  const url = request.url;
+  if (!url) {
+    return;
+  }
+
+  const queryParams = new URLSearchParams(url.split("?")[1]);
+  const token = queryParams.get("token") || "";
+  const userId = checkUser(token);
+  if (!userId) {
+    ws.close();
+    return;
+  }
+
+  users.push({
+    ws: ws,
+    userId: userId,
+    rooms: [],
+  });
+
+  ws.on("message", async function message(data) {
+    const parsedData = JSON.parse(data as unknown as string);
+
+    if (parsedData.type == "join-room") {
+      const user = users.find((x) => x.ws === ws);
+
+      user?.rooms.push(parsedData.roomId);
+    }
+
+    if (parsedData.type == "leave-room") {
+      const user = users.find((x) => x.ws === ws);
+      if (!user) return;
+      user.rooms = user?.rooms.filter((x) => x === parsedData.room);
+    }
+
+    if (parsedData.type == "chat") {
+      const roomId = parsedData.roomId;
+      const message = parsedData.message;
+
+      await prisma.chat.create({
+        data: {
+          message: message,
+          roomId: roomId,
+          userId: userId,
+        },
+      });
+
+      users.forEach((user) => {
+        if (user.rooms.includes(roomId)) {
+          user.ws.send(
+            JSON.stringify({
+              type: "chat",
+              message: message,
+              roomId,
+            }),
+          );
+        }
+      });
+    }
   });
 });
